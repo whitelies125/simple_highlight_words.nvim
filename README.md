@@ -10,13 +10,23 @@
 
 高亮光标所在的或附近的一个 word
 
+highlight a word on or near the cursor
+
+![84](https://github.com/whitelies125/simple_highlight_words.nvim/assets/47108287/dd84057a-1ec0-4772-94fc-ec75ecabb4da)
+
+
 ### visual
 
 高亮所选字符串
 
+highlight the selected string
+
+![85](https://github.com/whitelies125/simple_highlight_words.nvim/assets/47108287/78b8861a-f1a8-4371-a1fc-28d656176946)
+
+
 # install
 
-使用 lazy.nvim :
+use lazy.nvim :
 
 ```
 {
