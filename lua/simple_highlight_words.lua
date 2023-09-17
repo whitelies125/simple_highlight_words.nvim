@@ -76,6 +76,7 @@ local function highlight_clear()
         hightlight_id_set[k] = nil
     end
     color_group_index = 1
+    vim.cmd(":nohl")
 end
 
 local M = {}
