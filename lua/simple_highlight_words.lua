@@ -1,24 +1,9 @@
-local colors = { "#8CCBEA", "#A4E57E", "#FFDB72", "#FF7272", "#FFB3FF", "#9999FF", "#FA9425", "#C49791" }
-local highlight_prefix = "simple_hightlight_"
-for index, color in ipairs(colors) do
-    --[[
-    nvim_set_hl({ns_id}, {name}, {*val})
-    name: 高亮组名
-    val:
-        background: 设置用于高亮字符串的背景方框的颜色
-        foreground: 设置高亮后的字符串字体的颜色，这里设为黑色，避免 background 色与字体原本颜色相近导致看不清
-    --]]
-    vim.api.nvim_set_hl(0, highlight_prefix .. index, { background = color, foreground = "Black"})
-end
-
-local hightlight_id_set = {}
-local color_group_index = 1
+local M = {}
 
 local function highlight(word, pattern)
     -- 防止在空行使用该函数
     if word == '' then return end
     if hightlight_id_set[word] then
-        -- disable hightlight
         vim.fn.matchdelete(hightlight_id_set[word])
         hightlight_id_set[word] = nil;
         return
@@ -26,14 +11,22 @@ local function highlight(word, pattern)
     --[[
     matchadd({group}, {pattern},...)
     将符合 pattern 的字符串加入 group 高亮组
+    并返回一个 id，该 id 可用于 matchdelete(id) 删除高亮组 group 对该 pattern 的匹配
     --]]
     local id = vim.fn.matchadd(highlight_prefix .. color_group_index, pattern)
     hightlight_id_set[word] = id;
-    color_group_index = color_group_index + 1
-    if color_group_index > #colors then color_group_index = 1 end
+    color_group_index = color_group_index % #colors + 1
 end
 
-local function highlight_current_word()
+function M.highlight_clear()
+    for word, id in pairs(hightlight_id_set) do
+        vim.fn.matchdelete(id)
+        hightlight_id_set[word] = nil
+    end
+    vim.cmd(":nohl")
+end
+
+function M.highlight_word()
     --[[
     expand('<cword>')
     返回当前光标所在 word 的字符串
@@ -70,21 +63,31 @@ function highlight_string()
     highlight(str, pattern)
 end
 
-local function highlight_clear()
-    for k, v in pairs(hightlight_id_set) do
-        vim.fn.matchdelete(v)
-        hightlight_id_set[k] = nil
-    end
-    color_group_index = 1
-    vim.cmd(":nohl")
-end
-
-local M = {}
-
 function M.setup(opts)
-    vim.keymap.set('n', '<leader>hl', function() highlight_current_word() end, { noremap = true, silent = true })
-    vim.keymap.set('n', '<leader>nohl', function() highlight_clear() end, { noremap = true, silent = true })
-    vim.keymap.set('v', '<leader>hl', ":lua highlight_string()<CR>", { noremap = true, silent = true })
+    hightlight_id_set = {}
+    color_group_index = 1
+
+    local default_colors = { "#8CCBEA", "#A4E57E", "#FFDB72", "#FF7272", "#FFB3FF", "#9999FF", "#FA9425", "#C49791" }
+    --[[
+    lua 中, false 和 nil 为假，其他值都为真
+    not, 总是返回 true 或 false;
+    and, 当第一个值为 false 或 nil 时，则返回第一个值，否则返回第二个值
+    or, 当第一个值不为 false 或 nil 时，则返回第一个值，发展返回第二个值
+    and 和 or 都使用短路求值，仅在必要时才求解第二个值
+    --]]
+    colors = opts.colors or default_colors
+
+    highlight_prefix = "simple_hightlight_"
+    for index, color in ipairs(colors) do
+        --[[
+        nvim_set_hl({ns_id}, {name}, {*val})
+        name: 高亮组名
+        val:
+            background: 设置用于高亮字符串的背景方框的颜色
+            foreground: 设置高亮后的字符串字体的颜色，这里设为黑色，避免 background 色与字体原本颜色相近导致看不清
+        --]]
+        vim.api.nvim_set_hl(0, highlight_prefix .. index, { background = color, foreground = "Black"})
+    end
 end
 
 return M
