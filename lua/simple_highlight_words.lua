@@ -1,27 +1,63 @@
 local M = {}
 
-local function highlight(word, pattern)
-    -- 防止在空行使用该函数
-    if word == '' then return end
-    if hightlight_id_set[word] then
-        vim.fn.matchdelete(hightlight_id_set[word])
-        hightlight_id_set[word] = nil;
-        return
-    end
+local function highlight(pattern)
     --[[
-    matchadd({group}, {pattern},...)
-    将符合 pattern 的字符串加入 group 高亮组
-    并返回一个 id，该 id 可用于 matchdelete(id) 删除高亮组 group 对该 pattern 的匹配
+    getmatched([{win}])
+    返回之前 matchadd() 和 :match 命令为当前窗口定义的所有“匹配高亮”组成的列表 List
+    可给出 win 返回指定窗口的内容
     --]]
-    local id = vim.fn.matchadd(highlight_prefix .. color_group_index, pattern)
-    hightlight_id_set[word] = id;
-    color_group_index = color_group_index % #colors + 1
+    local cur_matches = vim.fn.getmatches()
+    local has_exsited = false
+    local id = nil
+    for _, item in pairs(cur_matches) do
+        if item['pattern'] == pattern then
+            has_exsited = true
+            id = item['id']
+            break;
+        end
+    end
+
+    if has_exsited == false then
+        --[[
+        matchadd({group}, {pattern},...)
+        将符合 pattern 的字符串加入 group 高亮组
+        并返回一个 id，该 id 可用于 matchdelete(id) 删除高亮组 group 对该 pattern 的匹配
+
+        为了方便，在这个文件中，我个人就把这种方式的高亮称为“匹配高亮”吧
+        --]]
+        vim.fn.matchadd(highlight_prefix .. color_group_index, pattern)
+        color_group_index = color_group_index % #colors + 1
+    else
+        vim.fn.matchdelete(id)
+    end
+
+    -- 同步当前 window 的“匹配高亮”到到所有 window
+    local cur_win = vim.api.nvim_get_current_win()
+    matches_config = vim.fn.getmatches()
+    local wins = vim.api.nvim_list_wins()
+    for _, win_id in pairs(wins) do
+        if win_id ~= cur_win then
+            --[[
+            setmatches({list} [, {win}])
+            原有的所有匹配高亮都被清除
+            按 {list} 对当前窗口设置“匹配高亮”
+            如果成功，返回 0，否则返回 -1
+            可给出 {win} 对指定窗口进行设置
+            --]]
+            vim.fn.setmatches(matches_config, win_id)
+        end
+    end
 end
 
 function M.highlight_clear()
-    for word, id in pairs(hightlight_id_set) do
-        vim.fn.matchdelete(id)
-        hightlight_id_set[word] = nil
+    local wins = vim.api.nvim_list_wins()
+    for _, win_id in pairs(wins) do
+        --[[
+        clearmatches([{win}])
+        清除之前 matchadd() 和 :match 命令为当前窗口定义的“匹配高亮”
+        可给出 {win} 清除指定窗口的“匹配高亮”
+        --]]
+        vim.fn.clearmatches(win_id)
     end
     vim.cmd(":nohl")
 end
@@ -32,6 +68,8 @@ function M.highlight_word()
     返回当前光标所在 word 的字符串
     --]]
     local word = vim.fn.expand('<cword>')
+    -- 防止在空行使用该函数
+    if word == '' then return end
     --[[
     因为 matchadd() 是字符串匹配高亮，所以当一个 word 的子串是符合条件的，则会高亮这个子串
     例如，matchadd("Visula", 'vim') 会高亮所有字符串 vim，包括 nvim neovim，中的子串 vim 部分
@@ -42,8 +80,8 @@ function M.highlight_word()
     防止要高亮的字符串中含有一些别的用于 pattern 的字符串，导致出现预期外的结果
     类似的还有 "\M"，会使得其后的模式的解释方式就如同设定了 'nomagic' 选项一样。
     --]]
-    local pattern  = "\\V\\<" .. word .. "\\>"
-    highlight(word, pattern)
+    local pattern = "\\V\\<" .. word .. "\\>"
+    highlight(pattern)
 end
 
 function highlight_string()
@@ -59,13 +97,15 @@ function highlight_string()
     else
         str = vim.api.nvim_buf_get_text(0, start_row-1, start_col-1, end_row-1, end_col, {})[1]
     end
+    -- 防止在空行使用该函数
+    if str == '' then return end
     local pattern  = "\\V" .. str
-    highlight(str, pattern)
+    highlight(pattern)
 end
 
 function M.setup(opts)
-    hightlight_id_set = {}
     color_group_index = 1
+    matches_config = {}
 
     local default_colors = { "#8CCBEA", "#A4E57E", "#FFDB72", "#FF7272", "#FFB3FF", "#9999FF", "#FA9425", "#C49791" }
     --[[
@@ -88,6 +128,14 @@ function M.setup(opts)
         --]]
         vim.api.nvim_set_hl(0, highlight_prefix .. index, { background = color, foreground = "Black"})
     end
+
+    vim.api.nvim_create_autocmd({ "WinNew" }, {
+        callback = function(ev)
+            -- 新建 window 前，同步“匹配高亮”到新建的 window
+            local cur_win = vim.api.nvim_get_current_win()
+            vim.fn.setmatches(matches_config, cur_win)
+        end
+    })
 end
 
 return M
