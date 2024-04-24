@@ -25,15 +25,15 @@ local function highlight(pattern)
 
         为了方便，在这个文件中，我个人就把这种方式的高亮称为“匹配高亮”吧
         --]]
-        vim.fn.matchadd(highlight_prefix .. color_group_index, pattern)
-        color_group_index = color_group_index % #colors + 1
+        vim.fn.matchadd(Highlight_prefix .. Color_group_index, pattern)
+        Color_group_index = Color_group_index % #Colors + 1
     else
         vim.fn.matchdelete(id)
     end
 
     -- 同步当前 window 的“匹配高亮”到到所有 window
     local cur_win = vim.api.nvim_get_current_win()
-    matches_config = vim.fn.getmatches()
+    Matches_config = vim.fn.getmatches()
     local wins = vim.api.nvim_list_wins()
     for _, win_id in pairs(wins) do
         if win_id ~= cur_win then
@@ -44,7 +44,7 @@ local function highlight(pattern)
             如果成功，返回 0，否则返回 -1
             可给出 {win} 对指定窗口进行设置
             --]]
-            vim.fn.setmatches(matches_config, win_id)
+            vim.fn.setmatches(Matches_config, win_id)
         end
     end
 end
@@ -97,15 +97,20 @@ function highlight_string()
     else
         str = vim.api.nvim_buf_get_text(0, start_row-1, start_col-1, end_row-1, end_col, {})[1]
     end
+
+    local first_no_blank_index = str:find("%S")
+    if first_no_blank_index ~= nil then
+        str = str:sub(first_no_blank_index)
+    end
     -- 防止在空行使用该函数
     if str == '' then return end
-    local pattern  = "\\V" .. str
+    local pattern = "\\V" .. str
     highlight(pattern)
 end
 
 function M.setup(opts)
-    color_group_index = 1
-    matches_config = {}
+    Color_group_index = 1
+    Matches_config = {}
 
     local default_colors = { "#8CCBEA", "#A4E57E", "#FFDB72", "#FF7272", "#FFB3FF", "#9999FF", "#FA9425", "#C49791" }
     --[[
@@ -115,10 +120,10 @@ function M.setup(opts)
     or, 当第一个值不为 false 或 nil 时，则返回第一个值，发展返回第二个值
     and 和 or 都使用短路求值，仅在必要时才求解第二个值
     --]]
-    colors = opts.colors or default_colors
+    Colors = opts.Colors or default_colors
 
-    highlight_prefix = "simple_hightlight_"
-    for index, color in ipairs(colors) do
+    Highlight_prefix = "simple_hightlight_"
+    for index, color in ipairs(Colors) do
         --[[
         nvim_set_hl({ns_id}, {name}, {*val})
         name: 高亮组名
@@ -126,14 +131,14 @@ function M.setup(opts)
             background: 设置用于高亮字符串的背景方框的颜色
             foreground: 设置高亮后的字符串字体的颜色，这里设为黑色，避免 background 色与字体原本颜色相近导致看不清
         --]]
-        vim.api.nvim_set_hl(0, highlight_prefix .. index, { background = color, foreground = "Black"})
+        vim.api.nvim_set_hl(0, Highlight_prefix .. index, { background = color, foreground = "Black" })
     end
 
     vim.api.nvim_create_autocmd({ "WinNew" }, {
         callback = function(ev)
             -- 新建 window 前，同步“匹配高亮”到新建的 window
             local cur_win = vim.api.nvim_get_current_win()
-            vim.fn.setmatches(matches_config, cur_win)
+            vim.fn.setmatches(Matches_config, cur_win)
         end
     })
 end
