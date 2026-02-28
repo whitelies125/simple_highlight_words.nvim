@@ -1,64 +1,76 @@
 local M = {}
 
+local Pattern_states = {}
+local Color_group_index = 1
+local Colors = {}
+local Highlight_prefix = "simple_hightlight_"
+
+local function escape_pattern_text(text)
+    -- 在 Vim 的 \V 模式下，反斜杠仍有特殊含义，需要先转义。
+    return text:gsub("\\", "\\\\")
+end
+
+local function add_pattern_all_windows(pattern, group)
+    --[[
+    matchadd({group}, {pattern}, ...)
+    在各个 window 中为 pattern 添加“匹配高亮”，并记录每个 window 的 match id。
+    --]]
+    local ids = {}
+    for _, win_id in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_is_valid(win_id) then
+            vim.api.nvim_win_call(win_id, function()
+                ids[win_id] = vim.fn.matchadd(group, pattern)
+            end)
+        end
+    end
+    Pattern_states[pattern] = { group = group, ids = ids }
+end
+
+local function remove_pattern_all_windows(pattern)
+    --[[
+    matchdelete({id} [, {win}])
+    仅删除本插件创建的 match id，不影响其他插件/用户创建的匹配高亮。
+    --]]
+    local pattern_state = Pattern_states[pattern]
+    if pattern_state == nil then
+        return
+    end
+
+    for win_id, id in pairs(pattern_state.ids) do
+        pcall(vim.fn.matchdelete, id, win_id)
+    end
+
+    Pattern_states[pattern] = nil
+end
+
 local function highlight(pattern)
     --[[
-    getmatched([{win}])
-    返回之前 matchadd() 和 :match 命令为当前窗口定义的所有“匹配高亮”组成的列表 List
-    可给出 win 返回指定窗口的内容
+    切换某个 pattern 的高亮状态:
+    - 不存在: 在所有 window 添加
+    - 已存在: 在所有 window 删除
     --]]
-    local cur_matches = vim.fn.getmatches()
-    local has_exsited = false
-    local id = nil
-    for _, item in pairs(cur_matches) do
-        if item['pattern'] == pattern then
-            has_exsited = true
-            id = item['id']
-            break;
-        end
-    end
-
-    if has_exsited == false then
-        --[[
-        matchadd({group}, {pattern},...)
-        将符合 pattern 的字符串加入 group 高亮组
-        并返回一个 id，该 id 可用于 matchdelete(id) 删除高亮组 group 对该 pattern 的匹配
-
-        为了方便，在这个文件中，我个人就把这种方式的高亮称为“匹配高亮”吧
-        --]]
-        vim.fn.matchadd(Highlight_prefix .. Color_group_index, pattern)
+    if Pattern_states[pattern] == nil then
+        add_pattern_all_windows(pattern, Highlight_prefix .. Color_group_index)
         Color_group_index = Color_group_index % #Colors + 1
     else
-        vim.fn.matchdelete(id)
-    end
-
-    -- 同步当前 window 的“匹配高亮”到到所有 window
-    local cur_win = vim.api.nvim_get_current_win()
-    Matches_config = vim.fn.getmatches()
-    local wins = vim.api.nvim_list_wins()
-    for _, win_id in pairs(wins) do
-        if win_id ~= cur_win then
-            --[[
-            setmatches({list} [, {win}])
-            原有的所有匹配高亮都被清除
-            按 {list} 对当前窗口设置“匹配高亮”
-            如果成功，返回 0，否则返回 -1
-            可给出 {win} 对指定窗口进行设置
-            --]]
-            vim.fn.setmatches(Matches_config, win_id)
-        end
+        remove_pattern_all_windows(pattern)
     end
 end
 
 function M.highlight_clear()
-    local wins = vim.api.nvim_list_wins()
-    for _, win_id in pairs(wins) do
-        --[[
-        clearmatches([{win}])
-        清除之前 matchadd() 和 :match 命令为当前窗口定义的“匹配高亮”
-        可给出 {win} 清除指定窗口的“匹配高亮”
-        --]]
-        vim.fn.clearmatches(win_id)
+    --[[
+    只清理本插件维护的 pattern，不使用 clearmatches() 全量清空窗口高亮，
+    避免误删其他插件/用户的匹配高亮。
+    --]]
+    local patterns = {}
+    for pattern, _ in pairs(Pattern_states) do
+        table.insert(patterns, pattern)
     end
+
+    for _, pattern in ipairs(patterns) do
+        remove_pattern_all_windows(pattern)
+    end
+
     vim.cmd(":nohl")
 end
 
@@ -80,49 +92,66 @@ function M.highlight_word()
     防止要高亮的字符串中含有一些别的用于 pattern 的字符串，导致出现预期外的结果
     类似的还有 "\M"，会使得其后的模式的解释方式就如同设定了 'nomagic' 选项一样。
     --]]
-    local pattern = "\\V\\<" .. word .. "\\>"
+    local pattern = "\\V\\<" .. escape_pattern_text(word) .. "\\>"
     highlight(pattern)
 end
 
-function highlight_string()
-    local _, start_row, start_col, _ = unpack(vim.fn.getpos("'<"))
-    local _, end_row, end_col, _ = unpack(vim.fn.getpos("'>"))
+local function exit_visual_mode()
+    vim.api.nvim_input("<Esc>")
+end
+
+function M.highlight_string()
+    local _, start_row, start_col, _ = unpack(vim.fn.getpos("v"))
+    local end_row, end_col = unpack(vim.api.nvim_win_get_cursor(0));
+    end_col = end_col + 1
+
+    local mode = vim.api.nvim_get_mode().mode
+    if mode == "V" then
+        start_col = 1
+        end_col = vim.v.maxcol
+    end
+
+    if start_row > end_row or (start_row == end_row and start_col > end_col) then
+        start_row, end_row = end_row, start_row
+        start_col, end_col = end_col, start_col
+    end
+
     if start_row ~= end_row then
-        print("simple_hightlight_words.nvim : not support highlight multiple lines.")
+        vim.notify("simple_hightlight_words.nvim : not support highlight multiple lines.", vim.log.levels.WARN)
+        exit_visual_mode();
         return
     end
+
     local str = ""
     if end_col == vim.v.maxcol then
-        str = vim.api.nvim_buf_get_lines(0, start_row-1, start_row, true)[1]
+        str = vim.api.nvim_buf_get_lines(0, start_row - 1, start_row, true)[1]
     else
-        str = vim.api.nvim_buf_get_text(0, start_row-1, start_col-1, end_row-1, end_col, {})[1]
+        str = vim.api.nvim_buf_get_text(0, start_row - 1, start_col - 1, end_row - 1, end_col, {})[1]
     end
 
     local first_no_blank_index = str:find("%S")
     if first_no_blank_index ~= nil then
         str = str:sub(first_no_blank_index)
     end
+
     -- 防止在空行使用该函数
-    if str == '' then return end
-    local pattern = "\\V" .. str
+    if str == '' then 
+        exit_visual_mode();
+        return
+    end
+    local pattern = "\\V" .. escape_pattern_text(str)
     highlight(pattern)
+    exit_visual_mode();
 end
 
 function M.setup(opts)
+    opts = opts or {}
     Color_group_index = 1
-    Matches_config = {}
+    Pattern_states = {}
 
     local default_colors = { "#8CCBEA", "#A4E57E", "#FFDB72", "#FF7272", "#FFB3FF", "#9999FF", "#FA9425", "#C49791" }
-    --[[
-    lua 中, false 和 nil 为假，其他值都为真
-    not, 总是返回 true 或 false;
-    and, 当第一个值为 false 或 nil 时，则返回第一个值，否则返回第二个值
-    or, 当第一个值不为 false 或 nil 时，则返回第一个值，发展返回第二个值
-    and 和 or 都使用短路求值，仅在必要时才求解第二个值
-    --]]
-    Colors = opts.Colors or default_colors
+    Colors = opts.colors or default_colors
 
-    Highlight_prefix = "simple_hightlight_"
     for index, color in ipairs(Colors) do
         --[[
         nvim_set_hl({ns_id}, {name}, {*val})
@@ -134,12 +163,28 @@ function M.setup(opts)
         vim.api.nvim_set_hl(0, Highlight_prefix .. index, { background = color, foreground = "Black" })
     end
 
+    local augroup = vim.api.nvim_create_augroup("simple_highlight_words", { clear = true })
     vim.api.nvim_create_autocmd({ "WinNew" }, {
+        group = augroup,
+        callback = function(_)
+            local new_win = vim.api.nvim_get_current_win()
+            for pattern, pattern_state in pairs(Pattern_states) do
+                vim.api.nvim_win_call(new_win, function()
+                    pattern_state.ids[new_win] = vim.fn.matchadd(pattern_state.group, pattern)
+                end)
+            end
+        end,
+    })
+
+    vim.api.nvim_create_autocmd({ "WinClosed" }, {
+        group = augroup,
         callback = function(ev)
-            -- 新建 window 前，同步“匹配高亮”到新建的 window
-            local cur_win = vim.api.nvim_get_current_win()
-            vim.fn.setmatches(Matches_config, cur_win)
-        end
+            local win_id = tonumber(ev.match)
+            if win_id == nil then return end
+            for _, pattern_state in pairs(Pattern_states) do
+                pattern_state.ids[win_id] = nil
+            end
+        end,
     })
 end
 

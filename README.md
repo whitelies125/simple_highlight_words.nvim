@@ -52,7 +52,7 @@ use lazy.nvim :
         vim.keymap.set('n', '<leader>nohl', hl.highlight_clear, map_opt)
         -- 高亮 visual 模式下选中的字符串
         -- highlight the selected string in visual mode
-        vim.keymap.set('v', '<leader>hl', ":lua highlight_string()<CR>", map_opt)
+        vim.keymap.set('v', '<leader>hl', hl.highlight_string, map_opt)
     end,
 }
 ```
